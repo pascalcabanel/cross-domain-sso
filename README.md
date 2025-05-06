@@ -93,9 +93,11 @@ If the user is authenticated, it retrieves the access_token and sends a request 
 If the token is invalid or the session has expired on the Keycloak side, the user is signed out and redirected to the home page.
 
 This Custom middleware must be placed between 
+```csharp
 app.UseAuthentication();
 // Here
 app.UseAuthorization();
+```
 
 ```csharp
 app.Use(async (context, next) =>
