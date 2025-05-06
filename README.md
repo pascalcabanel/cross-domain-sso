@@ -148,14 +148,14 @@ This route is protected and only accessible to authenticated users.
             {
                 if (!context.User.Identity?.IsAuthenticated ?? true)
                 {
-                    return Results.BadRequest("Utilisateur non authentifié.");
+                    return Results.BadRequest("Unauthenticated user.");
                 }
 
                 var idToken = await context.GetTokenAsync("id_token");
 
                 if (string.IsNullOrEmpty(idToken))
                 {
-                    return Results.BadRequest("Token manquant.");
+                    return Results.BadRequest("Missing token.");
                 }
 
                 var logoutUri = Environment.GetEnvironmentVariable("signout-callback");
@@ -184,7 +184,7 @@ this endpoint is called from /logout page :
 @inject NavigationManager NavManager
 @rendermode InteractiveServer
 
-<h3>Déconnexion en cours 2...</h3>
+<h3>Logging out...</h3>
 
 @code {
     private bool _navigated = false;
