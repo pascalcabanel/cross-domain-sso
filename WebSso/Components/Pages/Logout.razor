@@ -9,6 +9,7 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        await Task.Delay(0);
         if (firstRender && !_navigated)
         {
             _navigated = true;

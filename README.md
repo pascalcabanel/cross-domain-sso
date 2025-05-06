@@ -18,73 +18,23 @@ This project demonstrates a working **Single Sign-On (SSO)** implementation usin
 
 ## 🔧 Step-by-Step Setup
 
-### 1. ✅ Generate Development Certificates
+### 🔐 Keycloak Configuration
 
-Using [mkcert](https://github.com/FiloSottile/mkcert), generate trusted local certificates:
+1. Create a realm (e.g. `test-realm`)
+2. Add client:
+   - `Client ID`: `your-client-id`
+   - `Access Type`: confidential
+   - `Valid Redirect URIs`: `https://www.mondomaine.fr/signin-oidc`
+   - `Base URL`: `https://www.mondomaine.fr/`
+   - `Web Origins`: `+`
 
-```bash
-choco install mkcert
-```
+3. Set `Valid Post Logout Redirect URIs` to:  
+   `https://www.mondomaine.fr/logout-success`
 
-```bash
-mkcert -install
-mkcert -cert-file mondomaine.fr.pem -key-file mondomaine.fr-key.pem mondomaine.fr www.mondomaine.fr
-mkcert -cert-file mondomaine.com.pem -key-file mondomaine.com-key.pem mondomaine.com www.mondomaine.com
-```
-The command mkcert -install is used to set up a local Certificate Authority (CA) on your development machine
-
-Move the `.pem` files into `/etc/nginx/certs`.
-
+![SSO Architecture](docs/keycloak_config.png)
 ---
 
-### 2. 🛠️ Configure Nginx as Reverse Proxy
-
-Example `nginx.conf` for HTTPS forwarding:
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name www.mondomaine.fr mondomaine.fr;
-
-    ssl_certificate     /etc/nginx/certs/mondomaine.fr.pem;
-    ssl_certificate_key /etc/nginx/certs/mondomaine.fr-key.pem;
-
-    # Configuration for signin with oidc / KeyCloak
-    proxy_busy_buffers_size   512k;
-    proxy_buffers   4 512k;
-    proxy_buffer_size   256k;
-    large_client_header_buffers 4 32k;
-
-    location / {
-        proxy_pass http://192.168.1.53:8888;
-        proxy_ssl_verify off; 
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "Upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        proxy_cookie_path / "/; HttpOnly; Secure; SameSite=None";
-    }
-}
-
-server {
-    listen 80;
-    server_name mondomaine.fr www.mondomaine.fr;
-    return 301 https://$host$request_uri;
-}
-```
-192.168.1.53 must be replaced by : 
- - the IP address of the machine hosting Docker; the Docker configuration is detailed further below. Or
- - From the URL that the proxy must redirect
-
-Ensure port `443` is open and reachable.
-
-
----
-
-### 3. 🧪 Program.cs – Authentication Configuration (Detailed)
+### 🧪 Program.cs – Authentication Configuration (Detailed)
 
 ```csharp
 builder.Services.AddAuthentication(options =>
@@ -145,7 +95,7 @@ This configuration enables:
 
 ---
 
-### 4. 🚀 Docker Compose
+### 🚀 Docker Compose
 
 This Docker Compose allows the same application to run on two different ports. The Nginx reverse proxy will handle redirecting www.mondomaine.fr to IP:8888 and www.mondomaine.com to IP:8889, respectively.
 
@@ -182,31 +132,94 @@ Use:
 ```bash
 docker compose up --build
 ```
+### ✅ Generate Development Certificates
+
+Using [mkcert](https://github.com/FiloSottile/mkcert), generate trusted local certificates:
+
+```bash
+choco install mkcert
+```
+
+```bash
+mkcert -install
+mkcert -cert-file mondomaine.fr.pem -key-file mondomaine.fr-key.pem mondomaine.fr www.mondomaine.fr
+mkcert -cert-file mondomaine.com.pem -key-file mondomaine.com-key.pem mondomaine.com www.mondomaine.com
+```
+The command mkcert -install is used to set up a local Certificate Authority (CA) on your development machine
+
+Move the `.pem` files into `/etc/nginx/certs`.
 
 ---
+### 🛠️ Install Nginx on ubuntu
 
-### 5. 🔐 Keycloak Configuration
+```bash
+sudo apt update
+sudo apt upgrade -y
+sudo apt install nginx -y
+```
 
-1. Create a realm (e.g. `test-realm`)
-2. Add client:
-   - `Client ID`: `your-client-id`
-   - `Access Type`: confidential
-   - `Valid Redirect URIs`: `https://www.mondomaine.fr/signin-oidc`
-   - `Base URL`: `https://www.mondomaine.fr/`
-   - `Web Origins`: `+`
+Start NGINX
+```bash
+sudo systemctl start nginx
+sudo systemctl enable nginx
+```
 
-3. Set `Valid Post Logout Redirect URIs` to:  
-   `https://www.mondomaine.fr/logout-success`
-
-![SSO Architecture](docs/keycloak_config.png)
 ---
+### 🛠️ Configure Nginx as Reverse Proxy
+
+Example `nginx.conf` for HTTPS forwarding:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name www.mondomaine.fr mondomaine.fr;
+
+    ssl_certificate     /etc/nginx/certs/mondomaine.fr.pem;
+    ssl_certificate_key /etc/nginx/certs/mondomaine.fr-key.pem;
+
+    # Configuration for signin with oidc / KeyCloak
+    proxy_busy_buffers_size   512k;
+    proxy_buffers   4 512k;
+    proxy_buffer_size   256k;
+    large_client_header_buffers 4 32k;
+
+    location / {
+        proxy_pass http://192.168.1.53:8888;
+        proxy_ssl_verify off; 
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "Upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_cookie_path / "/; HttpOnly; Secure; SameSite=None";
+    }
+}
+
+server {
+    listen 80;
+    server_name mondomaine.fr www.mondomaine.fr;
+    return 301 https://$host$request_uri;
+}
+```
+192.168.1.53 must be replaced by : 
+ - the IP address of the machine hosting Docker; the Docker configuration is detailed further below. Or
+ - From the URL that the proxy must redirect
+
+```bash
+sudo ln -s /etc/nginx/sites-available/mondomaine.com /etc/nginx/sites-enable
+sudo systemctl restart nginx
+```
+
+Ensure port `443` is open and reachable.
 
 ## 🧪 Test the POC
 
 - Open [https://www.mondomaine.fr](https://www.mondomaine.fr)
 - You will be redirected to Keycloak for authentication
 - Upon successful login, you're returned and logged into the app
-- Switch to https://www.mondomaine.fr, your are logged in
+- Switch to https://www.mondomaine.com, your are logged in
 - Try logging out and ensure you're redirected via Keycloak logout
 - Both app are signed out
 
