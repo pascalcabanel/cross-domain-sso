@@ -1,0 +1,25 @@
+services:
+  mondomaine-fr:
+    image: ${DOCKER_REGISTRY-}websso
+    environment:
+    - ASPNETCORE_ENVIRONMENT=Development
+    - ASPNETCORE_URLS=http://+:8080
+    - signout-callback=https://www.mondomaine.fr/signout-callback-oidc
+    - base-uri=https://www.mondomaine.fr
+    build:
+      context: .
+      dockerfile: WebSso/Dockerfile
+    ports:
+      - "8888:8080"
+  mondomaine-com:
+    image: ${DOCKER_REGISTRY-}websso
+    environment:
+    - ASPNETCORE_ENVIRONMENT=Development
+    - ASPNETCORE_URLS=http://+:8080
+    - signout-callback=https://www.mondomaine.com/signout-callback-oidc
+    - base-uri=https://www.mondomaine.com
+    build:
+      context: .
+      dockerfile: WebSso/Dockerfile
+    ports:
+      - "8889:8080"

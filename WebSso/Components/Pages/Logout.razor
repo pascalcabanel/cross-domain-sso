@@ -1,0 +1,18 @@
+﻿@page "/logout"
+@inject NavigationManager NavManager
+@rendermode InteractiveServer
+
+<h3>Déconnexion en cours 2...</h3>
+
+@code {
+    private bool _navigated = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_navigated)
+        {
+            _navigated = true;
+            NavManager.NavigateTo("/api/logout", forceLoad: true);
+        }
+    }
+}
