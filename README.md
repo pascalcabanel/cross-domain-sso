@@ -147,7 +147,6 @@ This route is protected and only accessible to authenticated users.
 ```csharp
 app.MapGet("/api/logout", async (HttpContext context) =>
 {
-    Console.WriteLine("👋 Déconnexion de l'utilisateur...");
     if (!context.User.Identity?.IsAuthenticated ?? true)
     {
         return Results.BadRequest("Utilisateur non authentifié.");
@@ -173,8 +172,6 @@ app.MapGet("/api/logout", async (HttpContext context) =>
                             $"?id_token_hint={idToken}" +
                             $"&post_logout_redirect_uri={Uri.EscapeDataString(logoutUri)}";
                 
-    Console.WriteLine($"👋  SignOut request with redirect on {logoutUri}");
-
     await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     await context.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme);
 
