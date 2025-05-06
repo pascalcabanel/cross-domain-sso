@@ -169,6 +169,11 @@ sudo systemctl enable nginx
 
 Example `nginx.conf` for HTTPS forwarding:
 
+```bash
+cd /etc/nginx/sites-available
+sudo nano mondomaine.fr
+```
+
 ```nginx
 server {
     listen 443 ssl;
@@ -208,11 +213,14 @@ server {
  - From the URL that the proxy must redirect
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/mondomaine.com /etc/nginx/sites-enable
+sudo ln -s /etc/nginx/sites-available/mondomaine.fr /etc/nginx/sites-enable
 sudo systemctl restart nginx
 ```
 
-Ensure port `443` is open and reachable.
+*Repeat the operation for mondomaine.com*
+
+Ensure port `443` is open and reachable on https://www.mondomaine.fr and https://www.mondomaine.com.
+
 
 ## 🧪 Test the POC
 
