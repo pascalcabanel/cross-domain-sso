@@ -87,10 +87,125 @@ builder.Services.AddAuthentication(options =>
     };
 });
 ```
+### 🧪 Program.cs – Custom middleware to validate the Keycloak session on the root path ("/")
+
+If the user is authenticated, it retrieves the access_token and sends a request to the Keycloak /userinfo endpoint to verify the token's validity.
+If the token is invalid or the session has expired on the Keycloak side, the user is signed out and redirected to the home page.
+
+This Custom middleware must be placed between 
+app.UseAuthentication();
+// Here
+app.UseAuthorization();
+
+```csharp
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path == "/" && context.User.Identity?.IsAuthenticated == true)
+    {
+        var accessToken = await context.GetTokenAsync("access_token");
+
+        if (!string.IsNullOrEmpty(accessToken))
+        {
+            var httpClient = new HttpClient();
+            var authority = builder.Configuration.GetSection("KeyCloak")["realm"];
+            var userInfoEndpoint = $"{authority}/protocol/openid-connect/userinfo";
+
+            var request = new HttpRequestMessage(HttpMethod.Get, userInfoEndpoint);
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+
+            try
+            {
+                var response = await httpClient.SendAsync(request);
+                if (!response.IsSuccessStatusCode)
+                {
+                    // Token invalide ou session expirée : déconnexion
+                    await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                    context.Response.Redirect("/");
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                // Gestion des erreurs de communication avec Keycloak
+                Console.WriteLine($"Erreur lors de la vérification de la session Keycloak : {ex.Message}");
+                await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                context.Response.Redirect("/");
+                return;
+            }
+        }
+    }
+
+    await next();
+});
+```
+### 🧪 Program.cs – Custom middleware to validate the Keycloak session on the root path ("/")
+
+This custom middleware handle user logout via Keycloak using OpenID Connect.
+This route is protected and only accessible to authenticated users.
+
+```csharp
+            app.MapGet("/api/logout", async (HttpContext context) =>
+            {
+                if (!context.User.Identity?.IsAuthenticated ?? true)
+                {
+                    return Results.BadRequest("Utilisateur non authentifié.");
+                }
+
+                var idToken = await context.GetTokenAsync("id_token");
+
+                if (string.IsNullOrEmpty(idToken))
+                {
+                    return Results.BadRequest("Token manquant.");
+                }
+
+                var logoutUri = Environment.GetEnvironmentVariable("signout-callback");
+                if (string.IsNullOrEmpty(logoutUri))
+                {
+                    logoutUri = $"{context.Request.Scheme}://{context.Request.Host}/signout-callback-oidc";
+                }
+                var authority = context.RequestServices
+                    .GetRequiredService<IConfiguration>()
+                    .GetSection("KeyCloak")["realm"];
+
+                var keycloakLogout = $"{authority}/protocol/openid-connect/logout" +
+                                     $"?id_token_hint={idToken}" +
+                                     $"&post_logout_redirect_uri={Uri.EscapeDataString(logoutUri)}";
+                
+                await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                await context.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme);
+
+                return Results.Redirect(keycloakLogout);
+            }).RequireAuthorization();
+```
+
+this endpoint is called from /logout page :
+```csharp
+@page "/logout"
+@inject NavigationManager NavManager
+@rendermode InteractiveServer
+
+<h3>Déconnexion en cours 2...</h3>
+
+@code {
+    private bool _navigated = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await Task.Delay(0);
+        if (firstRender && !_navigated)
+        {
+            _navigated = true;
+            NavManager.NavigateTo("/api/logout", forceLoad: true);
+        }
+    }
+}
+```
+
 
 This configuration enables:
 - Token persistence in cookies
 - OIDC-based login/logout flows
+- Check Keycloak session
 - Secure redirect URIs
 
 ---
