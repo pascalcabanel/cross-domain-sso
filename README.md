@@ -1,168 +1,231 @@
 
-# 🧠 Proof of Concept – Authentification SSO multi-domaines avec Keycloak
+# 🔐 Blazor Server SSO Authentication with Keycloak – Proof of Concept
 
-## 🎯 Objectif du projet
-
-Ce projet a pour but de démontrer la mise en œuvre d’une **authentification centralisée (SSO)** entre deux applications (`www.mondomaine.fr` et `www.mondomaine.com`) à l’aide de **Keycloak** et du protocole **OpenID Connect (OIDC)**.
-
-L’ensemble fonctionne en environnement Docker avec un **reverse proxy Nginx** en frontal pour la gestion des certificats HTTPS générés localement avec `mkcert`.
+This project demonstrates a working **Single Sign-On (SSO)** implementation using **Keycloak** as the identity provider and **Blazor Server** as the front-end framework. It showcases how two domains (e.g., `mondomaine.fr` and `mondomaine.com`) can authenticate users via Keycloak and share authentication state.
 
 ---
 
-## 🏗️ Architecture globale
+## 🧰 Technologies
 
+- **.NET 9.0 (Blazor Server)**
+- **Keycloak (OpenID Connect)**
+- **Nginx (reverse proxy with TLS support)**
+- **Docker & Docker Compose**
+- **mkcert (development SSL certificates)**
+
+
+![SSO Architecture](docs/Architecture.png)  
+
+## 🔧 Step-by-Step Setup
+
+### 1. ✅ Generate Development Certificates
+
+Using [mkcert](https://github.com/FiloSottile/mkcert), generate trusted local certificates:
+
+```bash
+choco install mkcert
 ```
- Utilisateur ⇄ Nginx ⇄ [mondomaine.fr (Docker)]
-               ⇓
-              Keycloak
-               ⇑
- ⇄ Nginx ⇄ [mondomaine.com (Docker)]
-```
-
-- **mondomaine.fr** et **mondomaine.com** sont des applications .NET 9 hébergées dans Docker.
-- **Keycloak** est utilisé comme fournisseur OIDC.
-- **Nginx** gère le HTTPS avec des certificats générés localement.
-
----
-
-## 🔧 Étapes de mise en œuvre
-
-### 1. Création des certificats SSL
 
 ```bash
 mkcert -install
-mkcert -cert-file mondomaine.fr.pem -key-file mondomaine.fr-key.pem www.mondomaine.fr
-mkcert -cert-file mondomaine.com.pem -key-file mondomaine.com-key.pem www.mondomaine.com
+mkcert -cert-file mondomaine.fr.pem -key-file mondomaine.fr-key.pem mondomaine.fr www.mondomaine.fr
+mkcert -cert-file mondomaine.com.pem -key-file mondomaine.com-key.pem mondomaine.com www.mondomaine.com
 ```
+The command mkcert -install is used to set up a local Certificate Authority (CA) on your development machine
 
-### 2. Ajout de la racine de certificat dans Windows
+Move the `.pem` files into `/etc/nginx/certs`.
 
-```bash
-certutil -addstore -f "Root" rootCA.pem
-```
+---
 
-> Cela permet à Chrome et à Windows de faire confiance aux certificats locaux.
+### 2. 🛠️ Configure Nginx as Reverse Proxy
 
-### 3. Configuration Nginx
-
-#### Exemple pour `www.mondomaine.fr`
+Example `nginx.conf` for HTTPS forwarding:
 
 ```nginx
 server {
     listen 443 ssl;
-    server_name www.mondomaine.fr;
+    server_name www.mondomaine.fr mondomaine.fr;
 
-    ssl_certificate /etc/nginx/certs/mondomaine.fr.pem;
+    ssl_certificate     /etc/nginx/certs/mondomaine.fr.pem;
     ssl_certificate_key /etc/nginx/certs/mondomaine.fr-key.pem;
+
+    # Configuration for signin with oidc / KeyCloak
+    proxy_busy_buffers_size   512k;
+    proxy_buffers   4 512k;
+    proxy_buffer_size   256k;
+    large_client_header_buffers 4 32k;
 
     location / {
         proxy_pass http://192.168.1.53:8888;
+        proxy_ssl_verify off; 
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "Upgrade";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_cookie_path / "/; HttpOnly; Secure; SameSite=None";
     }
 }
+
+server {
+    listen 80;
+    server_name mondomaine.fr www.mondomaine.fr;
+    return 301 https://$host$request_uri;
+}
+```
+192.168.1.53 must be replaced by : 
+ - the IP address of the machine hosting Docker; the Docker configuration is detailed further below. Or
+ - From the URL that the proxy must redirect
+
+Ensure port `443` is open and reachable.
+
+
+---
+
+### 3. 🧪 Program.cs – Authentication Configuration (Detailed)
+
+```csharp
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = OpenIdConnectDefaults.AuthenticationScheme;
+})
+.AddCookie(options =>
+{
+    options.Cookie.Name = "WebSsoAuthCookie";
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.ExpireTimeSpan = TimeSpan.FromDays(7);
+    options.SlidingExpiration = true;
+})
+.AddOpenIdConnect(OpenIdConnectDefaults.AuthenticationScheme, options =>
+{
+    options.Authority = "https://auth.mondomaine.fr/realms/your-realm";
+    options.ClientId = "your-client-id";
+    options.ClientSecret = "your-secret";
+    options.ResponseType = "code";
+
+    options.SaveTokens = true;
+    options.GetClaimsFromUserInfoEndpoint = true;
+    options.CallbackPath = "/signin-oidc";
+    options.SignedOutRedirectUri = "https://www.mondomaine.fr/logout-success";
+
+    options.Scope.Add("openid");
+    options.Scope.Add("profile");
+    options.Scope.Add("email");
+
+    options.Events = new OpenIdConnectEvents
+    {
+        OnRedirectToIdentityProviderForSignOut = async context =>
+        {
+            var idToken = await context.HttpContext.GetTokenAsync("id_token");
+            var logoutUri = $"{context.Options.Authority}/protocol/openid-connect/logout" +
+                            $"?id_token_hint={idToken}" +
+                            $"&post_logout_redirect_uri={Uri.EscapeDataString(context.Options.SignedOutRedirectUri)}";
+
+            context.Response.Redirect(logoutUri);
+            context.HandleResponse();
+        },
+        OnSignedOutCallbackRedirect = context =>
+        {
+            context.Response.Redirect("/logout-success");
+            context.HandleResponse();
+            return Task.CompletedTask;
+        }
+    };
+});
 ```
 
-Même principe pour `www.mondomaine.com` avec port `8889`.
+This configuration enables:
+- Token persistence in cookies
+- OIDC-based login/logout flows
+- Secure redirect URIs
 
-### 4. Docker Compose
+---
+
+### 4. 🚀 Docker Compose
+
+This Docker Compose allows the same application to run on two different ports. The Nginx reverse proxy will handle redirecting www.mondomaine.fr to IP:8888 and www.mondomaine.com to IP:8889, respectively.
 
 ```yaml
 services:
   mondomaine-fr:
-    image: websso
+    image: ${DOCKER_REGISTRY-}websso
+    environment:
+    - ASPNETCORE_ENVIRONMENT=Development
+    - ASPNETCORE_URLS=http://+:8080
+    - signout-callback=https://www.mondomaine.fr/signout-callback-oidc
+    - base-uri=https://www.mondomaine.fr
     build:
       context: .
       dockerfile: WebSso/Dockerfile
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ASPNETCORE_URLS=http://+:8080
     ports:
       - "8888:8080"
-
   mondomaine-com:
-    image: websso
+    image: ${DOCKER_REGISTRY-}websso
+    environment:
+    - ASPNETCORE_ENVIRONMENT=Development
+    - ASPNETCORE_URLS=http://+:8080
+    - signout-callback=https://www.mondomaine.com/signout-callback-oidc
+    - base-uri=https://www.mondomaine.com
     build:
       context: .
       dockerfile: WebSso/Dockerfile
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ASPNETCORE_URLS=http://+:8080
     ports:
       - "8889:8080"
 ```
 
-### 5. Configuration Keycloak
+Use:
 
-Dans le client OIDC Keycloak (`test-client`) :
-
-- **Valid redirect URIs** :  
-  `https://www.mondomaine.fr/signin-oidc`  
-  `https://www.mondomaine.com/signin-oidc`
-
-- **Valid post logout redirect URIs** :  
-  `https://www.mondomaine.fr/logout-success`  
-  `https://www.mondomaine.com/logout-success`
-
-- **Web Origins** : `*` ou chaque domaine explicitement
-
----
-
-## ⚙️ Configuration de l’application .NET (extrait `Program.cs`)
-
-```csharp
-options.Events = new OpenIdConnectEvents
-{
-    OnRedirectToIdentityProviderForSignOut = async context =>
-    {
-        var idToken = await context.HttpContext.GetTokenAsync("id_token");
-        var logoutUri = $"{context.Options.Authority}/protocol/openid-connect/logout" +
-                        $"?id_token_hint={idToken}" +
-                        $"&post_logout_redirect_uri={Uri.EscapeDataString(context.Options.SignedOutRedirectUri)}";
-
-        context.Response.Redirect(logoutUri);
-        context.HandleResponse();
-    },
-    OnSignedOutCallbackRedirect = context =>
-    {
-        context.Response.Redirect("/logout-success");
-        context.HandleResponse();
-        return Task.CompletedTask;
-    }
-};
+```bash
+docker compose up --build
 ```
 
-### 🔐 Authentification
+---
 
-- Système d’authentification basé sur cookie persistant
-- Utilisation des events `OnRedirectToIdentityProvider`, `OnSignedOutCallbackRedirect`, etc.
-- Vérification des tokens OIDC et récupération des claims utilisateurs
+### 5. 🔐 Keycloak Configuration
+
+1. Create a realm (e.g. `test-realm`)
+2. Add client:
+   - `Client ID`: `your-client-id`
+   - `Access Type`: confidential
+   - `Valid Redirect URIs`: `https://www.mondomaine.fr/signin-oidc`
+   - `Base URL`: `https://www.mondomaine.fr/`
+   - `Web Origins`: `+`
+
+3. Set `Valid Post Logout Redirect URIs` to:  
+   `https://www.mondomaine.fr/logout-success`
+
+![SSO Architecture](docs/keycloak_config.png)
+---
+
+## 🧪 Test the POC
+
+- Open [https://www.mondomaine.fr](https://www.mondomaine.fr)
+- You will be redirected to Keycloak for authentication
+- Upon successful login, you're returned and logged into the app
+- Switch to https://www.mondomaine.fr, your are logged in
+- Try logging out and ensure you're redirected via Keycloak logout
+- Both app are signed out
 
 ---
 
-## 🔍 Résultat observé
+## 📌 Notes
 
-| Action                       | Résultat attendu                             |
-|-----------------------------|----------------------------------------------|
-| Accès à mondomaine.fr       | Redirection vers Keycloak                    |
-| Connexion                   | Session active sur mondomaine.fr ET .com     |
-| Déconnexion                 | Session détruite sur les deux domaines       |
-| Cookie persistant           | Géré par le middleware cookie                |
+- Chrome may block `http://localhost:<port>` for cookies, use HTTPS + trusted cert
+- If behind a proxy, ensure `X-Forwarded-*` headers are passed and `ForwardedHeaders` middleware is used
+- Use the browser dev tools → Application → Cookies to debug authentication state
 
 ---
 
-## ⚠️ Points de vigilance
+## 🧾 License
 
-- `SameSite=None` requis dans les cookies pour SSO inter-domaines
-- HTTPS **obligatoire** pour `openid-connect`
-- `mkcert` génère un certificat auto-signé → pas adapté en production
-- Ne pas oublier d’importer les **deux certificats** côté Windows si tests locaux
+MIT
 
 ---
 
-## ✅ Conclusion
+## 📬 Contact
 
-Ce POC valide la possibilité d’une **authentification unique multi-domaines** avec Keycloak. Il sert de base solide pour intégrer une **IAM** centralisée dans un système microservices ou multi-applications.
-
+For support or collaboration, open an issue or contact the maintainer.
