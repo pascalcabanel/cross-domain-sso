@@ -145,38 +145,41 @@ This custom middleware handle user logout via Keycloak using OpenID Connect.
 This route is protected and only accessible to authenticated users.
 
 ```csharp
-            app.MapGet("/api/logout", async (HttpContext context) =>
-            {
-                if (!context.User.Identity?.IsAuthenticated ?? true)
-                {
-                    return Results.BadRequest("Unauthenticated user.");
-                }
+app.MapGet("/api/logout", async (HttpContext context) =>
+{
+    Console.WriteLine("👋 Déconnexion de l'utilisateur...");
+    if (!context.User.Identity?.IsAuthenticated ?? true)
+    {
+        return Results.BadRequest("Utilisateur non authentifié.");
+    }
 
-                var idToken = await context.GetTokenAsync("id_token");
+    var idToken = await context.GetTokenAsync("id_token");
 
-                if (string.IsNullOrEmpty(idToken))
-                {
-                    return Results.BadRequest("Missing token.");
-                }
+    if (string.IsNullOrEmpty(idToken))
+    {
+        return Results.BadRequest("Token manquant.");
+    }
 
-                var logoutUri = Environment.GetEnvironmentVariable("signout-callback");
-                if (string.IsNullOrEmpty(logoutUri))
-                {
-                    logoutUri = $"{context.Request.Scheme}://{context.Request.Host}/signout-callback-oidc";
-                }
-                var authority = context.RequestServices
-                    .GetRequiredService<IConfiguration>()
-                    .GetSection("KeyCloak")["realm"];
+    var logoutUri = Environment.GetEnvironmentVariable("signout-callback");
+    if (string.IsNullOrEmpty(logoutUri))
+    {
+        logoutUri = $"{context.Request.Scheme}://{context.Request.Host}/signout-callback-oidc";
+    }
+    var authority = context.RequestServices
+        .GetRequiredService<IConfiguration>()
+        .GetSection("KeyCloak")["realm"];
 
-                var keycloakLogout = $"{authority}/protocol/openid-connect/logout" +
-                                     $"?id_token_hint={idToken}" +
-                                     $"&post_logout_redirect_uri={Uri.EscapeDataString(logoutUri)}";
+    var keycloakLogout = $"{authority}/protocol/openid-connect/logout" +
+                            $"?id_token_hint={idToken}" +
+                            $"&post_logout_redirect_uri={Uri.EscapeDataString(logoutUri)}";
                 
-                await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-                await context.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme);
+    Console.WriteLine($"👋  SignOut request with redirect on {logoutUri}");
 
-                return Results.Redirect(keycloakLogout);
-            }).RequireAuthorization();
+    await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    await context.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme);
+
+    return Results.Redirect(keycloakLogout);
+}).RequireAuthorization();
 ```
 
 this endpoint is called from /logout page :
