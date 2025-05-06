@@ -120,7 +120,7 @@ app.Use(async (context, next) =>
                 var response = await httpClient.SendAsync(request);
                 if (!response.IsSuccessStatusCode)
                 {
-                    // Token invalide ou session expirée : déconnexion
+                    // Invalid token or session expired: logging out
                     await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
                     context.Response.Redirect("/");
                     return;
@@ -128,8 +128,7 @@ app.Use(async (context, next) =>
             }
             catch (Exception ex)
             {
-                // Gestion des erreurs de communication avec Keycloak
-                Console.WriteLine($"Erreur lors de la vérification de la session Keycloak : {ex.Message}");
+                // Handling communication errors with Keycloak
                 await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
                 context.Response.Redirect("/");
                 return;
